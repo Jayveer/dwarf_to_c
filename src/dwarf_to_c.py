@@ -45,8 +45,7 @@ def parse_arguments():
             help='Compilation unit name', nargs='*')
     return parser.parse_args()        
 
-from bintools.dwarf import DWARF
-from bintools.dwarf.enums import DW_AT, DW_TAG, DW_LANG, DW_ATE, DW_FORM, DW_OP
+from elftools.elf.elffile import ELFFile
 from pycunparser.c_generator import CGenerator
 from pycunparser import c_ast
 from dwarfhelpers import get_flag, get_str, get_int, get_ref, not_none, expect_str
@@ -67,9 +66,9 @@ class ERROR(object):
 
 # Create enum/struct/union <name> to predefine types
 TAG_NODE_CONS = {
-    DW_TAG.enumeration_type: c_ast.Enum,
-    DW_TAG.structure_type:   c_ast.Struct,
-    DW_TAG.union_type:       c_ast.Union
+    "DW_TAG_enumeration_type": c_ast.Enum,
+    "DW_TAG_structure_type":   c_ast.Struct,
+    "DW_TAG_union_type":       c_ast.Union
 }
 
 WRITTEN_NONE = 0   # Nothing has been written about this type
@@ -77,7 +76,7 @@ WRITTEN_PREREF = 1 # Predefinition has been written
 WRITTEN_FINAL = 2  # Final structure has been written
 
 def unistr(x):
-    return unicode(str(x), 'latin-1')
+    return (str(x).encode('latin-1'))
 
 # Syntax tree helpers
 def Comment(x):
@@ -103,7 +102,7 @@ def to_c_process(die, by_offset, names, rv, written, preref=False):
         A type ref is a function that, given a name, constructs a syntax tree
         for referring to that type.
         '''
-        type_ = get_ref(die, 'type')
+        type_ = get_ref(die, 'DW_AT_type')
         if DEBUG:
             print (die.offset, "->", type_)
         if type_ is None:
@@ -120,7 +119,7 @@ def to_c_process(die, by_offset, names, rv, written, preref=False):
     names[die.offset] = typeref = ERROR(die.offset) # prevent unbounded recursion
 
     # Typeref based on name: simple
-    name = get_str(die, 'name')
+    name = get_str(die, 'DW_AT_name')
     if name is not None:
         try:
             prefix = TAG_NODE_CONS[die.tag](name, None)
@@ -131,12 +130,12 @@ def to_c_process(die, by_offset, names, rv, written, preref=False):
             if preref: # early-out
                 return typeref
 
-    if die.tag == DW_TAG.enumeration_type:
+    if die.tag == 'DW_TAG_enumeration_type':
         items = []
-        for enumval in die.children:
-            assert(enumval.tag == DW_TAG.enumerator)
-            (sname, const_value) = (not_none(get_str(enumval,'name')), 
-                                   not_none(get_int(enumval,'const_value')))
+        for enumval in die._children:
+            assert(enumval.tag == 'DW_TAG_enumerator')
+            (sname, const_value) = (not_none(get_str(enumval,'DW_AT_name')), 
+                                   not_none(get_int(enumval,'DW_AT_const_value')))
             items.append(EnumItem(sname, const_value))
         enum = c_ast.Enum(name, c_ast.EnumeratorList(items))
         if name is None:
@@ -146,15 +145,15 @@ def to_c_process(die, by_offset, names, rv, written, preref=False):
                 rv.append(SimpleDecl(enum))
                 written[(die.tag, name)] = WRITTEN_FINAL # typedef is always final
 
-    elif die.tag == DW_TAG.typedef:
+    elif die.tag == 'DW_TAG_typedef':
         assert(name is not None)
-        ref = get_type_ref(die, 'type')
+        ref = get_type_ref(die, 'DW_AT_type')
         if written[(die.tag, name)] != WRITTEN_FINAL:
             rv.append(c_ast.Typedef(name, [], ['typedef'], ref(name)))
             written[(die.tag, name)] = WRITTEN_FINAL # typedef is always final
         typeref = base_type_ref(name) 
 
-    elif die.tag == DW_TAG.base_type: # IdentifierType
+    elif die.tag == 'DW_TAG_base_type': # IdentifierType
         if name is None: 
             name = 'unknown_base' #??
         if written[(die.tag, name)] != WRITTEN_FINAL:
@@ -162,50 +161,50 @@ def to_c_process(die, by_offset, names, rv, written, preref=False):
             written[(die.tag, name)] = WRITTEN_FINAL # typedef is always final
         typeref = base_type_ref(name)
 
-    elif die.tag == DW_TAG.pointer_type:
-        ref = get_type_ref(die, 'type')
+    elif die.tag == 'DW_TAG_pointer_type':
+        ref = get_type_ref(die, 'DW_AT_type')
         typeref = ptr_to_ref(ref) 
 
-    elif die.tag in [DW_TAG.const_type, DW_TAG.volatile_type, DW_TAG.restrict_type]:
+    elif die.tag in ['DW_TAG_const_type', 'DW_TAG_volatile_type', 'DW_TAG_restrict_type']:
         ref = get_type_ref(die, 'type')
         typeref = qualified_ref(ref, die.tag) 
 
-    elif die.tag in [DW_TAG.structure_type, DW_TAG.union_type]:
-        if get_flag(die, 'declaration', False):
+    elif die.tag in ['DW_TAG_structure_type', 'DW_TAG_union_type']:
+        if get_flag(die, 'DW_AT_declaration', False):
             items = None # declaration only
             level = WRITTEN_PREREF
         else:
             items = []
-            for enumval in die.children:
-                if enumval.tag != DW_TAG.member:
+            for enumval in die._children:
+                if enumval.tag != 'DW_TAG_member':
                     warning('Unexpected tag %s inside struct or union (die %i)' %
-                            (DW_TAG.fmt(enumval.tag), die.offset))
+                            (enumval.tag, die.offset))
                     continue
                 # data_member_location and bit_size / bit_offset as comment for fields
                 bit_size = None
                 comment = []
-                if 'data_member_location' in enumval.attr_dict:
-                    ml = enumval.attr_dict['data_member_location']
-                    if ml.form in ['sdata', 'data1', 'data2', 'data4', 'data8']:
+                if 'DW_AT_data_member_location' in enumval.attributes:
+                    ml = enumval.attributes['DW_AT_data_member_location']
+                    if ml.form in ['DW_FORM_sdata', 'DW_FORM_data1', 'DW_FORM_data2', 'DW_FORM_data4', 'DW_FORM_data8']:
                         comment.append("+0x%x" % ml.value)
-                    elif ml.form in ['block', 'block1']:
+                    elif ml.form in ['DW_FORM_block', 'DW_FORM_block1']:
                         expr = ml.value
-                        if len(expr.instructions) >= 1 and expr.instructions[0].opcode == DW_OP.plus_uconst:
-                            comment.append("+0x%x" % expr.instructions[0].operand_1)
+                        if len(expr) >= 1 and expr[0] == 0x23: #DW_OP.plus_uconst
+                            comment.append("+0x%x" % expr[1])
 
-                if 'bit_size' in enumval.attr_dict:
-                    bit_size = get_int(enumval, 'bit_size')
-                if 'bit_offset' in enumval.attr_dict:
-                    bit_offset = get_int(enumval, 'bit_offset')
+                if 'DW_AT_bit_size' in enumval.attributes:
+                    bit_size = get_int(enumval, 'DW_AT_bit_size')
+                if 'DW_AT_bit_offset' in enumval.attributes:
+                    bit_offset = get_int(enumval, 'DW_AT_bit_offset')
                     comment.append('bit %i..%i' % (bit_offset, bit_offset+bit_size-1))
-                if 'byte_size' in enumval.attr_dict:
-                    comment.append('of %i' % (8*get_int(enumval, 'byte_size')))
+                if 'DW_AT_byte_size' in enumval.attributes:
+                    comment.append('of %i' % (8*get_int(enumval, 'DW_AT_byte_size')))
                 # TODO: validate member location (alignment), bit offset
-                if 'name' in enumval.attr_dict:
-                    ename = expect_str(enumval.attr_dict['name'])
+                if 'DW_AT_name' in enumval.attributes:
+                    ename = expect_str(enumval.attributes['DW_AT_name'])
                 else:
                     ename = None
-                ref = get_type_ref(enumval, 'type')
+                ref = get_type_ref(enumval, 'DW_AT_type')
                 items.append(c_ast.Decl(ename,[],[],[], ref(ename), None,
                     IntConst(bit_size), postcomment=(' '.join(comment))))
             level = WRITTEN_FINAL
@@ -218,28 +217,28 @@ def to_c_process(die, by_offset, names, rv, written, preref=False):
                 rv.append(SimpleDecl(cons))
                 written[(die.tag,name)] = level
 
-    elif die.tag == DW_TAG.array_type:
-        subtype = get_type_ref(die, 'type')
+    elif die.tag == 'DW_TAG_array_type':
+        subtype = get_type_ref(die, 'DW_AT_type')
         count = None
-        for val in die.children:
-            if val.tag == DW_TAG.subrange_type:
-                count = get_int(val, 'upper_bound')
+        for val in die._children:
+            if val.tag == 'DW_TAG_subrange_type':
+                count = get_int(val, 'DW_AT_upper_bound')
         if count is not None:
             count += 1 # count is upper_bound + 1
         typeref = array_ref(subtype, count) 
 
-    elif die.tag in [DW_TAG.subroutine_type, DW_TAG.subprogram]:
-        inline = get_int(die, 'inline', 0)
-        returntype = get_type_ref(die, 'type')
+    elif die.tag in ['DW_TAG_subroutine_type', 'DW_TAG_subprogram']:
+        inline = get_int(die, 'DW_AT_inline', 0)
+        returntype = get_type_ref(die, 'DW_AT_type')
         args = []
-        for i,val in enumerate(die.children):
-            if val.tag == DW_TAG.formal_parameter:
-                argtype = get_type_ref(val, 'type')
-                argname = get_str(val, 'name', '')
+        for i,val in enumerate(die._children):
+            if val.tag == "DW_TAG_formal_parameter":
+                argtype = get_type_ref(val, 'DW_AT_type')
+                argname = get_str(val, 'DW_AT_name', '')
                 args.append(c_ast.Typename([], argtype(argname)))
         cons = lambda name: c_ast.FuncDecl(c_ast.ParamList(args), returntype(name))
 
-        if die.tag == DW_TAG.subprogram:
+        if die.tag == 'DW_TAG_subprogram':
             # Is it somehow specified whether this function is static or external?
             assert(name is not None)
             if written[(die.tag,name)] != WRITTEN_FINAL:
@@ -255,9 +254,9 @@ def to_c_process(die, by_offset, names, rv, written, preref=False):
         # reference_type, class_type, set_type   etc
         # variable
         if name is None or written[(die.tag,name)] != WRITTEN_FINAL:
-            rv.append(Comment("Unhandled: %s\n%s" % (DW_TAG.fmt(die.tag), unistr(die))))
+            rv.append(Comment("Unhandled: %s\n%s" % (die.tag, unistr(die))))
             written[(die.tag,name)] = WRITTEN_FINAL
-        warning("unhandled %s (die %i)" % (DW_TAG.fmt(die.tag), die.offset))
+        warning("unhandled %s (die %i)" % (die.tag, die.offset))
 
     names[die.offset] = typeref
     return typeref
@@ -290,39 +289,70 @@ def parse_dwarf(infile, cuname):
     if not os.path.isfile(infile):
         error("No such file %s" % infile)
         exit(1)
-    dwarf = DWARF(infile)
-    # Keep track of what has been written to the syntax tree
-    # Indexed by (tag,name)
-    # Instead of using this, it may be better to just collect and
-    # to dedup later, so that we can check that there are no name conflicts.
-    written = defaultdict(int) 
-    if cuname:
-        # TODO: handle multiple specific compilation units
-        cu = None
-        for i, c in enumerate(dwarf.info.cus):
-            if c.name.endswith(cuname[0]):
-                cu = c
-                break
-        if cu is None:
-            print("Can't find compilation unit %s" % cuname, file=sys.stderr)
-        statements = process_compile_unit(dwarf, cu, written)
-    else:
-        statements = []
-        for cu in dwarf.info.cus:
-            progress("Processing %s" % cu.name)
-            statements.extend(process_compile_unit(dwarf, cu, written))
-    return statements
+
+    with open(infile, 'rb') as f:
+        elffile = ELFFile(f)
+        if not elffile.has_dwarf_info():
+            print('  file has no DWARF info')
+            return
+
+        dwarf = elffile.get_dwarf_info()
+        # Keep track of what has been written to the syntax tree
+        # Indexed by (tag,name)
+        # Instead of using this, it may be better to just collect and
+        # to dedup later, so that we can check that there are no name conflicts.
+        written = defaultdict(int) 
+        
+
+        if cuname:
+            # TODO: handle multiple specific compilation units
+            cu = None
+            for c in dwarf.iter_CUs():
+                c_file = c.get_top_DIE().get_full_path()
+                if c_file.endswith(cuname[0]):
+                    cu = c
+                    break
+            if cu is None:
+                print("Can't find compilation unit %s" % cuname, file=sys.stderr)
+            statements = process_compile_unit(dwarf, cu, written)
+        else:
+            statements = []
+            for cu in dwarf.iter_CUs():
+                progress("Processing %s" % cu.get_top_DIE().get_full_path())
+                statements.extend(process_compile_unit(dwarf, cu, written))
+        return statements
+
+def make_dies_dict(cu):
+    dies_dict = dict()
+    for die in cu._dielist:
+        offset = die.offset - cu.cu_offset
+        dies_dict.update({offset:die})
+    return dies_dict
+
+def bytes_to_string(cu):
+    for die in cu._dielist:
+        if 'DW_AT_name' in die.attributes:
+            valueStr = die.attributes['DW_AT_name'].value.decode('utf-8')
+            die.attributes['DW_AT_name'] = die.attributes['DW_AT_name']._replace(value=valueStr)
+    return cu  
 
 def process_compile_unit(dwarf, cu, written):
-    cu_die = cu.compile_unit
-    c_file = cu.name # cu name is main file path
+    c_file = cu.get_top_DIE().get_full_path() # cu name is main file path
+
+    cu = bytes_to_string(cu)
+    cu_die = cu.get_top_DIE()
+
     statements = []
     prev_decl_file = object()
+
+    #dies_dict = 
+    dies_dict = make_dies_dict(cu)
+
     # Generate actual syntax tree
     names = {} # Defined names for dies, as references, indexed by offset
-    for child in cu_die.children:
-        decl_file_id = get_int(child, 'decl_file')
-        decl_file = cu.get_file_path(decl_file_id) if decl_file_id is not None else None
+    for child in cu_die.iter_children():
+        decl_file_id = get_int(child, 'DW_AT_decl_file')
+        decl_file = c_file if decl_file_id is not None else None
         # TODO: usefully keep track of decl_file per (final) symbol
         '''
         if decl_file != prev_decl_file:
@@ -334,12 +364,12 @@ def process_compile_unit(dwarf, cu, written):
                 s = "Defined in base"
             statements.append(Comment("======== " + s))
         '''
-        name = get_str(child, 'name')
+        name = get_str(child, 'DW_AT_name')
         if name is not None: # non-anonymous
             if DEBUG:
                 print("root", child.offset)
             if written[(child.tag, name)] != WRITTEN_FINAL:
-                to_c_process(child, cu.dies_dict, names, statements, written)
+                to_c_process(child, dies_dict, names, statements, written)
 
         prev_decl_file = decl_file
     return statements

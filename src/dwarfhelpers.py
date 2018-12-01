@@ -1,28 +1,28 @@
 
 # Functions to "unpack" DWARF attributes
 def expect_str(attr):
-    assert(attr.form in ['string', 'strp'])
+    assert(attr.form in ['DW_FORM_string', 'DW_FORM_strp'])
     return attr.value
 
 def expect_int(attr):
-    assert(attr.form in ['sdata', 'data1', 'data2', 'data4', 'data8'])
+    assert(attr.form in ['DW_FORM_sdata', 'DW_FORM_data1', 'DW_FORM_data2', 'DW_FORM_data4', 'DW_FORM_data8'])
     return attr.value
 
 def expect_ref(attr):
-    assert(attr.form in ['ref1', 'ref2', 'ref4', 'ref8'])
+    assert(attr.form in ['DW_FORM_ref1', 'DW_FORM_ref2', 'DW_FORM_ref4', 'DW_FORM_ref8'])
     return attr.value
 
 def expect_flag(attr):
-    assert(attr.form in ['flag','flag_present'])
+    assert(attr.form in ['DW_FORM_flag','DW_FORM_flag_present'])
     return attr.value
 
 def expect_addr(attr):
-    assert(attr.form in ['addr'])
+    assert(attr.form in ['DW_FORM_addr'])
     return attr.value
 
 def get_flag(die, attrname, default=None):
     try:
-        attr = die.attr_dict[attrname]
+        attr = die.attributes[attrname]
     except KeyError:
         return default
     else:
@@ -30,7 +30,7 @@ def get_flag(die, attrname, default=None):
 
 def get_str(die, attrname, default=None, allow_none=True):
     try:
-        attr = die.attr_dict[attrname]
+        attr = die.attributes[attrname]
     except KeyError:
         return default
     else:
@@ -38,7 +38,7 @@ def get_str(die, attrname, default=None, allow_none=True):
 
 def get_int(die, attrname, default=None):
     try:
-        attr = die.attr_dict[attrname]
+        attr = die.attributes[attrname]
     except KeyError:
         return default
     else:
@@ -46,7 +46,7 @@ def get_int(die, attrname, default=None):
 
 def get_ref(die, attrname, default=None):
     try:
-        attr = die.attr_dict[attrname]
+        attr = die.attributes[attrname]
     except KeyError:
         return default
     else:
@@ -54,7 +54,7 @@ def get_ref(die, attrname, default=None):
 
 def get_addr(die, attrname, default=None):
     try:
-        attr = die.attr_dict[attrname]
+        attr = die.attributes[attrname]
     except KeyError:
         return default
     else:

@@ -25,8 +25,7 @@ List usage of inline functions throughout program.
 from __future__ import print_function, division, unicode_literals
 import argparse, sys, os
 
-from bintools.dwarf import DWARF
-from bintools.dwarf.enums import DW_AT, DW_TAG, DW_LANG, DW_ATE, DW_FORM, DW_OP
+from elftools.elf.elffile import ELFFile
 from dwarfhelpers import get_flag, get_str, get_int, get_ref, not_none, expect_str, get_addr
 
 DEBUG=False
@@ -47,15 +46,15 @@ def parse_arguments():
     return parser.parse_args()
 
 def ip_range(die):
-    low_pc = get_addr(die, 'low_pc')
-    high_pc = get_addr(die, 'high_pc')
+    low_pc = get_addr(die, 'DW_AT_low_pc')
+    high_pc = get_addr(die, 'DW_AT_high_pc')
     if low_pc is not None and high_pc is not None:
         return '[0x%x-0x%x]' % (low_pc, high_pc)
     else:
         return None
 
 def entry_pc(die):
-    pc = get_addr(die, 'entry_pc')
+    pc = get_addr(die, 'DW_AT_entry_pc')
     if pc is not None:
         return '[entry=0x%x]' % pc
     else:
@@ -76,44 +75,70 @@ def process(die, by_offset, depth):
     # TODO: if lexical scope, print some nice information about parameters and variables
     indent = '  ' * depth
     
-    name = get_str(die, 'name')
+    name = get_str(die, 'DW_AT_name')
 
     # Look up abstract origin
-    origin = get_ref_lookup(die, 'abstract_origin', by_offset)
+    origin = get_ref_lookup(die, 'DW_AT_abstract_origin', by_offset)
     if origin is not None:
-        name = get_str(origin, 'name')
+        name = get_str(origin, 'DW_AT_name')
     #if 'ranges' in die.attr_dict:
     #    print(die.attr_dict['ranges'])
     #if 'location' in die.attr_dict: # has range, <reg> or <fbreg op>
     #    print(die.attr_dict['location'])
    
-    info = [ip_range(die), DW_TAG.fmt(die.tag), name, entry_pc(die)]
+    info = [ip_range(die), die.tag, name, entry_pc(die)]
 
     print(indent + (' '.join(filter_none(info))))
 
-    for child in die.children:
+    for child in die._children:
         process(child, by_offset, depth+1)
 
+def make_dies_dict(cu):
+    dies_dict = dict()
+    for die in cu._dielist:
+        offset = die.offset - cu.cu_offset
+        dies_dict.update({offset:die})
+    return dies_dict
+
+def bytes_to_string(cu):
+    for die in cu._dielist:
+        if 'DW_AT_name' in die.attributes:
+            valueStr = die.attributes['DW_AT_name'].value.decode('utf-8')
+            die.attributes['DW_AT_name'] = die.attributes['DW_AT_name']._replace(value=valueStr)
+    return cu  
+
 def process_compile_unit(dwarf, cu, out):
-    cu_die = cu.compile_unit
-    c_file = cu.name # cu name is main file path
-    for child in cu_die.children:
-        name = get_str(child, 'name')
-        if (name is not None and child.tag == DW_TAG.subprogram and 
-            'low_pc' in child.attr_dict): # non-anonymous function with memory address
-            process(child, cu.dies_dict, 0)
+
+    c_file = cu.get_top_DIE().get_full_path() # cu name is main file path    
+
+    cu = bytes_to_string(cu)
+    cu_die = cu.get_top_DIE()   
+    
+    dies_dict = make_dies_dict(cu)
+    for child in cu_die._children:
+        name = get_str(child, 'DW_AT_name')
+        if (name is not None and child.tag == 'DW_TAG_subprogram' and 
+            'DW_AT_low_pc' in child.attributes): # non-anonymous function with memory address
+            process(child, dies_dict, 0)
             print()
 
 def parse_dwarf(infile, out):
     if not os.path.isfile(infile):
         error("No such file %s" % infile)
         exit(1)
-    dwarf = DWARF(infile)
+
+    with open(infile, 'rb') as f:
+            elffile = ELFFile(f)
+            if not elffile.has_dwarf_info():
+                print('  file has no DWARF info')
+                return
+    
+    dwarf = elffile.get_dwarf_info()
     # inline functions are restricted to usage within a compilation unit,
     # no need to keep state between them
-    for cu in dwarf.info.cus:
+    for cu in dwarf.iter_CUs():
         print(SEP)
-        print(cu.name)
+        print(cu.get_top_DIE().get_full_path())
         print(SEP)
         process_compile_unit(dwarf, cu, out)
 
