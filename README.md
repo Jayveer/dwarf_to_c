@@ -5,6 +5,10 @@ Tool to generate C headers from DWARF debug data.
 Can be used to recover types and function signatures from compiled 
 executables and libraries with debug information.
 
+This is a fork of dwarf_to_c that uses pyelftools as the previous dwarf
+library was giving me problems whilst pyelftools worked fine. It also
+has support for python 3
+
 !!IMPORTANT NOTE!!
 ====================
 
