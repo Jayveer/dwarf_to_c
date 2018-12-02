@@ -45,7 +45,7 @@ def parse_arguments():
             help='Compilation unit name', nargs='*')
     return parser.parse_args()        
 
-from elftools.elf.elffile import ELFFile
+from pyelftools.elf.elffile import ELFFile
 from pycunparser.c_generator import CGenerator
 from pycunparser import c_ast
 from dwarfhelpers import get_flag, get_str, get_int, get_ref, not_none, expect_str
@@ -93,10 +93,10 @@ def SimpleDecl(x):
 
 
 # Main function to process a Dwarf die to a syntax tree fragment
-def to_c_process(die, by_offset, names, rv, written, preref=False):
+def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False):
     if DEBUG:
         print("to_c_process", die.offset, preref)
-    def get_type_ref(die, attr):
+    def get_type_ref(die, attr, isConst=False):
         '''
         Get type ref for a type attribute.
         A type ref is a function that, given a name, constructs a syntax tree
@@ -111,7 +111,7 @@ def to_c_process(die, by_offset, names, rv, written, preref=False):
             ref = names.get(type_)
             if ref is None:
                 #ref = base_type_ref('unknown_%i' % type_)
-                ref = to_c_process(by_offset[type_], by_offset, names, rv, written, preref=True)
+                ref = to_c_process(by_offset[type_], by_offset, names, rv, written, preref=True, isConst=isConst)
             elif ref is ERROR:
                 raise ValueError("Unexpected recursion")
         return ref
@@ -156,6 +156,8 @@ def to_c_process(die, by_offset, names, rv, written, preref=False):
     elif die.tag == 'DW_TAG_base_type': # IdentifierType
         if name is None: 
             name = 'unknown_base' #??
+        if isConst is True:
+            name = "const " + name
         if written[(die.tag, name)] != WRITTEN_FINAL:
             rv.append(Comment("Basetype: %s" % name))
             written[(die.tag, name)] = WRITTEN_FINAL # typedef is always final
@@ -166,8 +168,8 @@ def to_c_process(die, by_offset, names, rv, written, preref=False):
         typeref = ptr_to_ref(ref) 
 
     elif die.tag in ['DW_TAG_const_type', 'DW_TAG_volatile_type', 'DW_TAG_restrict_type']:
-        ref = get_type_ref(die, 'type')
-        typeref = qualified_ref(ref, die.tag) 
+        ref = get_type_ref(die, 'DW_AT_type', isConst=(die.tag is 'DW_TAG_const_type'))
+        typeref = qualified_ref(ref, die.tag)
 
     elif die.tag in ['DW_TAG_structure_type', 'DW_TAG_union_type']:
         if get_flag(die, 'DW_AT_declaration', False):
@@ -231,7 +233,8 @@ def to_c_process(die, by_offset, names, rv, written, preref=False):
         inline = get_int(die, 'DW_AT_inline', 0)
         returntype = get_type_ref(die, 'DW_AT_type')
         args = []
-        for i,val in enumerate(die._children):
+
+        for i, val in enumerate(die._children):
             if val.tag == "DW_TAG_formal_parameter":
                 argtype = get_type_ref(val, 'DW_AT_type')
                 argname = get_str(val, 'DW_AT_name', '')

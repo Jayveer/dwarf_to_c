@@ -25,7 +25,7 @@ List usage of inline functions throughout program.
 from __future__ import print_function, division, unicode_literals
 import argparse, sys, os
 
-from elftools.elf.elffile import ELFFile
+from pyelftools.elf.elffile import ELFFile
 from dwarfhelpers import get_flag, get_str, get_int, get_ref, not_none, expect_str, get_addr
 
 DEBUG=False
