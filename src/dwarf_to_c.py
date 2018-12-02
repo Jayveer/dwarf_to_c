@@ -233,13 +233,20 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
         inline = get_int(die, 'DW_AT_inline', 0)
         returntype = get_type_ref(die, 'DW_AT_type')
         args = []
-
+        vars = []
         for i, val in enumerate(die._children):
             if val.tag == "DW_TAG_formal_parameter":
                 argtype = get_type_ref(val, 'DW_AT_type')
                 argname = get_str(val, 'DW_AT_name', '')
                 args.append(c_ast.Typename([], argtype(argname)))
+            if val.tag == "DW_TAG_variable":
+                vartype = get_type_ref(val, 'DW_AT_type')
+                varname = get_str(val, 'DW_AT_name', '')
+                vars.append(SimpleDecl(vartype(varname)))
+                #rv.append(Comment("in " + name))
         cons = lambda name: c_ast.FuncDecl(c_ast.ParamList(args), returntype(name))
+        #decl_ = lambda name: SimpleDecl(returntype(name))
+        #cons = lambda name: c_ast.FuncDef(decl_(name), c_ast.ParamList(args), vars)
 
         if die.tag == 'DW_TAG_subprogram':
             # Is it somehow specified whether this function is static or external?
@@ -250,6 +257,11 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
                     rv.append(Comment('inline %s' % (CGenerator().visit(SimpleDecl(cons(name))))))
                 else:
                     rv.append(SimpleDecl(cons(name)))
+                    if vars:
+                        for v in vars:
+                            rv.append(v)
+                        rv.append(Comment("end of " + name))
+                    #rv.append(cons(name))
                 written[(die.tag,name)] = WRITTEN_FINAL
         else: # DW_TAG.subroutine_type
             typeref = cons
