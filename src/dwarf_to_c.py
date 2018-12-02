@@ -109,7 +109,7 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
             ref = base_type_ref('void')
         else:
             ref = names.get(type_)
-            if ref is None:
+            if ref is None or isConst:
                 #ref = base_type_ref('unknown_%i' % type_)
                 ref = to_c_process(by_offset[type_], by_offset, names, rv, written, preref=True, isConst=isConst)
             elif ref is ERROR:
@@ -253,6 +253,13 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
                 written[(die.tag,name)] = WRITTEN_FINAL
         else: # DW_TAG.subroutine_type
             typeref = cons
+    
+    elif die.tag == 'DW_TAG_variable':
+        subtype = get_type_ref(die, 'DW_AT_type')
+        if written[(die.tag, name)] != WRITTEN_FINAL:
+            rv.append(SimpleDecl(subtype(name)))
+            written[(die.tag, name)] = WRITTEN_FINAL
+    
     else:
         # reference_type, class_type, set_type   etc
         # variable
