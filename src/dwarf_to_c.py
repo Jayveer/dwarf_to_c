@@ -48,7 +48,7 @@ def parse_arguments():
 from pyelftools.elf.elffile import ELFFile
 from pycunparser.c_generator import CGenerator
 from pycunparser import c_ast
-from dwarfhelpers import get_flag, get_str, get_int, get_ref, not_none, expect_str
+from dwarfhelpers import get_flag, get_str, get_int, get_ref, not_none, expect_str, get_abstr
 
 # DWARF die to syntax tree fragment
 #     Algorithm: realize types when needed for processing
@@ -233,7 +233,7 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
         inline = get_int(die, 'DW_AT_inline', 0)
         returntype = get_type_ref(die, 'DW_AT_type')
         args = []
-        vars = []
+        body = []
         for i, val in enumerate(die._children):
             if val.tag == "DW_TAG_formal_parameter":
                 argtype = get_type_ref(val, 'DW_AT_type')
@@ -242,26 +242,29 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
             if val.tag == "DW_TAG_variable":
                 vartype = get_type_ref(val, 'DW_AT_type')
                 varname = get_str(val, 'DW_AT_name', '')
-                vars.append(SimpleDecl(vartype(varname)))
-                #rv.append(Comment("in " + name))
+                if varname != '__PRETTY_FUNCTION__':
+                    body.append(SimpleDecl(vartype(varname)))
+            if val.tag == "DW_TAG_inlined_subroutine":
+                absOffset = get_abstr(val, "DW_AT_abstract_origin")
+                absDie = by_offset[absOffset]
+                abstype = get_type_ref(absDie, 'DW_AT_type')
+                absname = get_str(absDie, 'DW_AT_name', '')
+                absfunc = c_ast.FuncDecl(None, abstype(absname))
+                high = val.attributes["DW_AT_high_pc"].value
+                low = val.attributes["DW_AT_low_pc"].value
+                comment = "inline low: %s, high: %s" % (hex(low), hex(high))
+                body.append(c_ast.Decl(None, [], [], [], absfunc, None, None, None, postcomment=comment))
         cons = lambda name: c_ast.FuncDecl(c_ast.ParamList(args), returntype(name))
-        #decl_ = lambda name: SimpleDecl(returntype(name))
-        #cons = lambda name: c_ast.FuncDef(decl_(name), c_ast.ParamList(args), vars)
 
         if die.tag == 'DW_TAG_subprogram':
             # Is it somehow specified whether this function is static or external?
             assert(name is not None)
             if written[(die.tag,name)] != WRITTEN_FINAL:
                 if inline: # Generate commented declaration for inlined function
-                    #rv.append(Comment('\n'.join(cons.generate())))
-                    rv.append(Comment('inline %s' % (CGenerator().visit(SimpleDecl(cons(name))))))
-                else:
-                    rv.append(SimpleDecl(cons(name)))
-                    if vars:
-                        for v in vars:
-                            rv.append(v)
-                        rv.append(Comment("end of " + name))
-                    #rv.append(cons(name))
+                    rv.append(Comment("inline"))                
+                funcDecl = (SimpleDecl(cons(name)))
+                comp = c_ast.Compound(body)
+                rv.append(c_ast.FuncDef(funcDecl, None, comp))
                 written[(die.tag,name)] = WRITTEN_FINAL
         else: # DW_TAG.subroutine_type
             typeref = cons

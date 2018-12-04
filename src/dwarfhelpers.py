@@ -60,6 +60,14 @@ def get_addr(die, attrname, default=None):
     else:
         return expect_addr(attr)
 
+def get_abstr(die, attrname, default=None):
+    try:
+        attr = die.attributes[attrname]
+    except KeyError:
+        return default
+    else:
+        return expect_ref(attr)
+
 def not_none(x):
     assert x is not None
     return x

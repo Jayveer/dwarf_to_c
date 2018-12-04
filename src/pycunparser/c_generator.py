@@ -23,7 +23,7 @@ class CGenerator(object):
         self.indent_level = 0
     
     def _make_indent(self):
-        return ' ' * self.indent_level
+        return '\t' * self.indent_level
     
     def visit(self, node):
         method = 'visit_' + node.__class__.__name__
@@ -127,7 +127,7 @@ class CGenerator(object):
         if n.name: s += ' ' + n.name
         if n.values:
             s += ' {\n'
-            self.indent_level += 2
+            self.indent_level += 1
             for i, enumerator in enumerate(n.values.enumerators):
                 s += self._make_indent() + enumerator.name
                 if enumerator.value: 
@@ -137,7 +137,7 @@ class CGenerator(object):
                 if enumerator.postcomment:
                     s += ' /* '+enumerator.postcomment+' */'
                 s += '\n'
-            self.indent_level -= 2
+            self.indent_level -= 1
             s += self._make_indent() + '}'
         return s
         
@@ -159,10 +159,10 @@ class CGenerator(object):
 
     def visit_Compound(self, n):
         s = self._make_indent() + '{\n'
-        self.indent_level += 2
+        self.indent_level += 1
         if n.block_items:
             s += ''.join(self._generate_stmt(stmt) for stmt in n.block_items)
-        self.indent_level -= 2
+        self.indent_level -= 1
         s += self._make_indent() + '}\n'
         return s
     
@@ -280,11 +280,11 @@ class CGenerator(object):
         if n.decls:
             s += '\n'
             s += self._make_indent() 
-            self.indent_level += 2
+            self.indent_level += 1
             s += '{\n'
             for decl in n.decls:
                 s += self._generate_stmt(decl)
-            self.indent_level -= 2
+            self.indent_level -= 1
             s += self._make_indent() + '}'
         return s
 
@@ -294,9 +294,9 @@ class CGenerator(object):
             some statements in this context.
         """
         typ = type(n)
-        if add_indent: self.indent_level += 2
+        if add_indent: self.indent_level += 1
         indent = self._make_indent()
-        if add_indent: self.indent_level -= 2
+        if add_indent: self.indent_level -= 1
         
         comment = ' /* '+n.postcomment+' */' if n.postcomment else ''
         if typ in ( 
