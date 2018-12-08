@@ -49,6 +49,7 @@ from pyelftools.elf.elffile import ELFFile
 from pycunparser.c_generator import CGenerator
 from pycunparser import c_ast
 from dwarfhelpers import get_flag, get_str, get_int, get_ref, not_none, expect_str, get_abstr
+from pyelftools.dwarf.die import DIE
 
 # DWARF die to syntax tree fragment
 #     Algorithm: realize types when needed for processing
@@ -333,7 +334,8 @@ def parse_dwarf(infile, cuname):
             # TODO: handle multiple specific compilation units
             cu = None
             for c in dwarf.iter_CUs():
-                c_file = c.get_top_DIE().get_full_path()
+                cuDie = DIE(cu=c, stream=c.dwarfinfo.debug_info_sec.stream, offset=c.cu_die_offset)
+                c_file = cuDie.get_full_path()
                 if c_file.endswith(cuname[0]):
                     cu = c
                     break
