@@ -5,4 +5,5 @@
 .svn
 .vscode
 private
+src/.vs/
 

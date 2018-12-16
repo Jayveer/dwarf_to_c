@@ -126,6 +126,23 @@ class NodeVisitor(object):
             self.visit(c)
 
 
+class MultiArrayDecl(Node):
+    def __init__(self, type, dimlist, coord=None, postcomment=None):
+        self.type = type
+        self.dimlist = dimlist
+        self.coord = coord
+        self.postcomment = postcomment
+
+    def children(self):
+        nodelist = []
+        if self.type is not None: nodelist.append(("type", self.type))
+        for i, child in enumerate(self.dimlist or []):
+            nodelist.append(("dim_items[%d]" % i, child))
+
+        return tuple(nodelist)
+
+    attr_names = ('name',)
+
 class ArrayDecl(Node):
     def __init__(self, type, dim, coord=None, postcomment=None):
         self.type = type

@@ -46,6 +46,13 @@ class CGenerator(object):
         arrref = self._parenthesize_unless_simple(n.name)
         return arrref + '[' + self.visit(n.subscript) + ']'
 
+    def visit_MultiArrayDecl(self, n):
+        s = self._generate_type(n.type)
+        #return marrref + '[' + self.visit(n.subscript) + ']'
+        for dim in n.dimlist:
+            s = s + '['+ dim.value +']'
+        return s
+
     def visit_StructRef(self, n):
         sref = self._parenthesize_unless_simple(n.name)
         return sref + n.type + self.visit(n.field)
