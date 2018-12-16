@@ -203,6 +203,8 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
                 if 'DW_AT_byte_size' in enumval.attributes:
                     comment.append('of %i' % (8*get_int(enumval, 'DW_AT_byte_size')))
                 # TODO: validate member location (alignment), bit offset
+                if 'DW_AT_decl_line' in enumval.attributes:
+                    comment.append('Line: %i' % get_int(enumval, 'DW_AT_decl_line'))
                 if 'DW_AT_name' in enumval.attributes:
                     ename = expect_str(enumval.attributes['DW_AT_name'])
                 else:
@@ -249,8 +251,13 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
             if val.tag == "DW_TAG_variable":
                 vartype = get_type_ref(val, 'DW_AT_type')
                 varname = get_str(val, 'DW_AT_name', '')
+                
+                if 'DW_AT_decl_line' in val.attributes:
+                    comment = ('Line: %i' % get_int(val, 'DW_AT_decl_line'))
+                
                 if varname != '__PRETTY_FUNCTION__':
-                    body.append(SimpleDecl(vartype(varname)))
+                    #body.append(SimpleDecl(vartype(varname)))
+                    body.append(c_ast.Decl(None, [], [], [], vartype(varname), None, None, None, postcomment=comment))
             if val.tag == "DW_TAG_inlined_subroutine":
                 absOffset = get_abstr(val, "DW_AT_abstract_origin")
                 absDie = by_offset[absOffset]
@@ -258,7 +265,7 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
                 absname = get_str(absDie, 'DW_AT_name', '')
                 absfunc = c_ast.FuncDecl(None, abstype(absname))
                 high = val.attributes["DW_AT_high_pc"].value
-                low = val.attributes["DW_AT_low_pc"].value
+                low = val.attributes["DW_AT_low_pc"].value                
                 comment = "inline low: %s, high: %s" % (hex(low), hex(high))
                 body.append(c_ast.Decl(None, [], [], [], absfunc, None, None, None, postcomment=comment))
         cons = lambda name: c_ast.FuncDecl(c_ast.ParamList(args), returntype(name))
@@ -268,7 +275,12 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
             assert(name is not None)
             if written[(die.tag,name)] != WRITTEN_FINAL:
                 if inline: # Generate commented declaration for inlined function
-                    rv.append(Comment("inline"))                
+                    if inline == 1:
+                        rv.append(Comment("inlined by compiler"))       
+                    elif inline == 2:
+                        rv.append(Comment("declared inlined but wasn't"))
+                    elif inline == 3:
+                        rv.append(Comment("inline"))
                 funcDecl = (SimpleDecl(cons(name)))
                 comp = c_ast.Compound(body)
                 rv.append(c_ast.FuncDef(funcDecl, None, comp))
@@ -375,9 +387,22 @@ def bytes_to_string(cu):
             die.attributes['DW_AT_name'] = die.attributes['DW_AT_name']._replace(value=valueStr)
     return cu  
 
+def make_file_dict(dwarf, cu, c_file):
+    fileArray = []
+    line = dwarf.line_program_for_CU(cu)
+    for entry in line.header.file_entry:
+        dirIndex = entry.dir_index-1
+        if dirIndex == -1:
+            path = cu.get_top_DIE().attributes['DW_AT_comp_dir']
+            str =  path.value.decode('utf-8') + "/" + (entry.name.decode('utf-8'))
+        else:
+            str = (line.header.include_directory[dirIndex].decode('utf-8')) + "/" + (entry.name.decode('utf-8'))
+        fileArray.append(str)
+    return fileArray
+
 def process_compile_unit(dwarf, cu, written):
     c_file = cu.get_top_DIE().get_full_path() # cu name is main file path
-
+    fileArray = make_file_dict(dwarf, cu, c_file)
     cu = bytes_to_string(cu)
     cu_die = cu.get_top_DIE()
 
@@ -391,18 +416,20 @@ def process_compile_unit(dwarf, cu, written):
     names = {} # Defined names for dies, as references, indexed by offset
     for child in cu_die.iter_children():
         decl_file_id = get_int(child, 'DW_AT_decl_file')
-        decl_file = c_file if decl_file_id is not None else None
-        # TODO: usefully keep track of decl_file per (final) symbol
-        '''
+        decl_line = get_int(child, 'DW_AT_decl_line')
+
+
+        decl_file = fileArray[decl_file_id-1] if decl_file_id is not None else None
+        
         if decl_file != prev_decl_file:
-            if decl_file == c_file:
-                s = "Defined in compilation unit"
-            elif decl_file is not None:
+            if decl_file is not None:
                 s = "Defined in " + decl_file
-            else:
-                s = "Defined in base"
+                statements.append(Comment("======== " + s))
+
+        if decl_line is not None:
+            s = "Line: %i" % decl_line
             statements.append(Comment("======== " + s))
-        '''
+
         name = get_str(child, 'DW_AT_name')
         if name is not None: # non-anonymous
             if DEBUG:
