@@ -92,6 +92,11 @@ def EnumItem(key, value):
 def SimpleDecl(x):
     return c_ast.Decl(None, [], [], [], x, None, None) 
 
+def add_line_number(die, statements):
+    decl_line = get_int(die, 'DW_AT_decl_line')
+    if decl_line is not None:
+            s = "Line: %i" % decl_line
+            statements.append(Comment("======== " + s))
 
 # Main function to process a Dwarf die to a syntax tree fragment
 def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False):
@@ -143,6 +148,7 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
             typeref = anon_ref(enum)
         else:
             if written[(die.tag, name)] != WRITTEN_FINAL:
+                add_line_number(die, rv)
                 rv.append(SimpleDecl(enum))
                 written[(die.tag, name)] = WRITTEN_FINAL # typedef is always final
 
@@ -150,6 +156,7 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
         assert(name is not None)
         ref = get_type_ref(die, 'DW_AT_type')
         if written[(die.tag, name)] != WRITTEN_FINAL:
+            add_line_number(die, rv)
             rv.append(c_ast.Typedef(name, [], ['typedef'], ref(name)))
             written[(die.tag, name)] = WRITTEN_FINAL # typedef is always final
         typeref = base_type_ref(name) 
@@ -160,7 +167,7 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
         if isConst is True:
             name = "const " + name
         if written[(die.tag, name)] != WRITTEN_FINAL:
-            rv.append(Comment("Basetype: %s" % name))
+            #rv.append(Comment("Basetype: %s" % name))
             written[(die.tag, name)] = WRITTEN_FINAL # typedef is always final
         typeref = base_type_ref(name)
 
@@ -175,6 +182,7 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
     elif die.tag in ['DW_TAG_structure_type', 'DW_TAG_union_type']:
         if get_flag(die, 'DW_AT_declaration', False):
             items = None # declaration only
+            add_line_number(die, rv)
             level = WRITTEN_PREREF
         else:
             items = []
@@ -219,6 +227,7 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
             typeref = anon_ref(cons)
         else:
             if written[(die.tag,name)] < level:
+                add_line_number(die, rv)
                 rv.append(SimpleDecl(cons))
                 written[(die.tag,name)] = level
 
@@ -238,23 +247,39 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
         else:
             typeref = array_ref(subtype, count)
 
-    elif die.tag in ['DW_TAG_subroutine_type', 'DW_TAG_subprogram']:
+    elif die.tag in ['DW_TAG_subroutine_type', 'DW_TAG_subprogram', 'DW_TAG_lexical_block']:
         inline = get_int(die, 'DW_AT_inline', 0)
         returntype = get_type_ref(die, 'DW_AT_type')
         args = []
         body = []
         for i, val in enumerate(die._children):
+            if val.tag == "DW_TAG_lexical_block":
+                lexRet = to_c_process(val, by_offset, names, rv, written, preref=True)
+                for i, bod in enumerate(lexRet):
+                    body.append(bod)
             if val.tag == "DW_TAG_formal_parameter":
+                absOffset = get_abstr(val, "DW_AT_abstract_origin")
+                if absOffset is not None:
+                    absDie = by_offset[absOffset]
+                    val = absDie
                 argtype = get_type_ref(val, 'DW_AT_type')
                 argname = get_str(val, 'DW_AT_name', '')
+                if die.tag =='DW_TAG_lexical_block':
+                    body.append(c_ast.Decl(None, [], [], [], argtype(argname), None, None, None, postcomment='lexical scope'))
                 args.append(c_ast.Typename([], argtype(argname)))
             if val.tag == "DW_TAG_variable":
+                absOffset = get_abstr(val, "DW_AT_abstract_origin")
+                if absOffset is not None:
+                    absDie = by_offset[absOffset]
+                    val = absDie
                 vartype = get_type_ref(val, 'DW_AT_type')
                 varname = get_str(val, 'DW_AT_name', '')
                 
+                comment = ''
                 if 'DW_AT_decl_line' in val.attributes:
                     comment = ('Line: %i' % get_int(val, 'DW_AT_decl_line'))
-                
+                if die.tag =='DW_TAG_lexical_block':
+                    comment += ' lexical scope'
                 if varname != '__PRETTY_FUNCTION__':
                     #body.append(SimpleDecl(vartype(varname)))
                     body.append(c_ast.Decl(None, [], [], [], vartype(varname), None, None, None, postcomment=comment))
@@ -274,6 +299,7 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
             # Is it somehow specified whether this function is static or external?
             assert(name is not None)
             if written[(die.tag,name)] != WRITTEN_FINAL:
+                add_line_number(die, rv)
                 if inline: # Generate commented declaration for inlined function
                     if inline == 1:
                         rv.append(Comment("inlined by compiler"))       
@@ -285,12 +311,18 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
                 comp = c_ast.Compound(body)
                 rv.append(c_ast.FuncDef(funcDecl, None, comp))
                 written[(die.tag,name)] = WRITTEN_FINAL
+        elif die.tag == 'DW_TAG_lexical_block':
+            #funcDecl = (SimpleDecl(cons('lexical')))
+            #comp = c_ast.Compound(body)
+            #rv.append(c_ast.FuncDef(funcDecl, None, comp))
+            return body
         else: # DW_TAG.subroutine_type
             typeref = cons
     
     elif die.tag == 'DW_TAG_variable':
         subtype = get_type_ref(die, 'DW_AT_type')
         if written[(die.tag, name)] != WRITTEN_FINAL:
+            add_line_number(die, rv)
             rv.append(SimpleDecl(subtype(name)))
             written[(die.tag, name)] = WRITTEN_FINAL
     
@@ -416,7 +448,6 @@ def process_compile_unit(dwarf, cu, written):
     names = {} # Defined names for dies, as references, indexed by offset
     for child in cu_die.iter_children():
         decl_file_id = get_int(child, 'DW_AT_decl_file')
-        decl_line = get_int(child, 'DW_AT_decl_line')
 
 
         decl_file = fileArray[decl_file_id-1] if decl_file_id is not None else None
@@ -425,10 +456,6 @@ def process_compile_unit(dwarf, cu, written):
             if decl_file is not None:
                 s = "Defined in " + decl_file
                 statements.append(Comment("======== " + s))
-
-        if decl_line is not None:
-            s = "Line: %i" % decl_line
-            statements.append(Comment("======== " + s))
 
         name = get_str(child, 'DW_AT_name')
         if name is not None: # non-anonymous
