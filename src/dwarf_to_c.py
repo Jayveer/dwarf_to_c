@@ -247,7 +247,7 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
         else:
             typeref = array_ref(subtype, count)
 
-    elif die.tag in ['DW_TAG_subroutine_type', 'DW_TAG_subprogram', 'DW_TAG_lexical_block']:
+    elif die.tag in ['DW_TAG_subroutine_type', 'DW_TAG_subprogram', 'DW_TAG_lexical_block', 'DW_TAG_inlined_subroutine']:
         inline = get_int(die, 'DW_AT_inline', 0)
         returntype = get_type_ref(die, 'DW_AT_type')
         args = []
@@ -255,8 +255,7 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
         for i, val in enumerate(die._children):
             if val.tag == "DW_TAG_lexical_block":
                 lexRet = to_c_process(val, by_offset, names, rv, written, preref=True)
-                for i, bod in enumerate(lexRet):
-                    body.append(bod)
+                body.append(lexRet)
             if val.tag == "DW_TAG_formal_parameter":
                 absOffset = get_abstr(val, "DW_AT_abstract_origin")
                 if absOffset is not None:
@@ -264,7 +263,7 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
                     val = absDie
                 argtype = get_type_ref(val, 'DW_AT_type')
                 argname = get_str(val, 'DW_AT_name', '')
-                if die.tag =='DW_TAG_lexical_block':
+                if die.tag in ['DW_TAG_lexical_block']:
                     body.append(c_ast.Decl(None, [], [], [], argtype(argname), None, None, None, postcomment='lexical scope'))
                 args.append(c_ast.Typename([], argtype(argname)))
             if val.tag == "DW_TAG_variable":
@@ -292,7 +291,11 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
                 high = val.attributes["DW_AT_high_pc"].value
                 low = val.attributes["DW_AT_low_pc"].value                
                 comment = "inline low: %s, high: %s" % (hex(low), hex(high))
+                if die.tag =='DW_TAG_lexical_block':
+                    comment += ' lexical scope'
                 body.append(c_ast.Decl(None, [], [], [], absfunc, None, None, None, postcomment=comment))
+                subRet = to_c_process(val, by_offset, names, rv, written, preref=True)
+                body.append(subRet)
         cons = lambda name: c_ast.FuncDecl(c_ast.ParamList(args), returntype(name))
 
         if die.tag == 'DW_TAG_subprogram':
@@ -311,11 +314,9 @@ def to_c_process(die, by_offset, names, rv, written, preref=False, isConst=False
                 comp = c_ast.Compound(body)
                 rv.append(c_ast.FuncDef(funcDecl, None, comp))
                 written[(die.tag,name)] = WRITTEN_FINAL
-        elif die.tag == 'DW_TAG_lexical_block':
-            #funcDecl = (SimpleDecl(cons('lexical')))
-            #comp = c_ast.Compound(body)
-            #rv.append(c_ast.FuncDef(funcDecl, None, comp))
-            return body
+        elif die.tag in ['DW_TAG_lexical_block', 'DW_TAG_inlined_subroutine']:
+            comp = c_ast.Compound(body)
+            return comp
         else: # DW_TAG.subroutine_type
             typeref = cons
     
